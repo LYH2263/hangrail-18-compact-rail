@@ -15,7 +15,7 @@ from app.schemas.schemas import (
     RailOut,
     StoreOut,
 )
-from app.services.rail_engine import Segment, first_fit
+from app.services.rail_engine import CompactError, Segment, compact, first_fit
 
 api_router = APIRouter()
 
@@ -121,6 +121,34 @@ def pickup(body: PickupRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
     return order
+
+
+@api_router.post("/rails/{rail_id}/compact", response_model=OccupancyOut)
+def compact_rail(rail_id: int, db: Session = Depends(get_db)):
+    rail = db.get(HangRail, rail_id)
+    if not rail:
+        raise HTTPException(404, "挂杆不存在")
+    placements = db.scalars(
+        select(RailPlacement)
+        .where(RailPlacement.rail_id == rail.id, RailPlacement.active == 1)
+        .order_by(RailPlacement.start_cm, RailPlacement.end_cm)
+    ).all()
+    try:
+        packed = compact(
+            rail.length_cm, [Segment(p.start_cm, p.end_cm) for p in placements]
+        )
+    except CompactError as exc:
+        db.rollback()
+        raise HTTPException(409, f"紧凑重排失败，已回滚：{exc}")
+    try:
+        for p, seg in zip(placements, packed):
+            p.start_cm = seg.start_cm
+            p.end_cm = seg.end_cm
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(409, "紧凑重排失败，已回滚")
+    return occupancy(rail.id, db)
 
 
 @api_router.post("/overdue/scan", response_model=list[OrderOut])

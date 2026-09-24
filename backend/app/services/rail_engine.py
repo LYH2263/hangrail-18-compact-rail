@@ -45,3 +45,37 @@ def first_fit(rail_length: float, occupied: list[Segment], garment_cm: float) ->
 
 def overlaps(a: Segment, b: Segment) -> bool:
     return not (a.end_cm <= b.start_cm or b.end_cm <= a.start_cm)
+
+
+class CompactError(ValueError):
+    """Raised when a rail cannot be compacted; callers must roll back."""
+
+
+def compact(rail_length: float, occupied: list[Segment]) -> list[Placement]:
+    """Left-pack segments in their original start order, gap-free.
+
+    Returns one Placement per input segment, aligned with the segments sorted
+    by (start, end). Garment lengths and relative order are preserved. Raises
+    CompactError on invalid/overlapping/out-of-range input so the caller can
+    roll the whole rail back to its pre-compact spans.
+    """
+    if rail_length <= 0:
+        raise CompactError("挂杆长度无效")
+    segs = sorted(occupied, key=lambda s: (s.start_cm, s.end_cm))
+    for s in segs:
+        if s.length <= 0:
+            raise CompactError("占位长度无效")
+        if s.start_cm < -1e-9 or s.end_cm > rail_length + 1e-9:
+            raise CompactError("占位超出杆长，无法紧凑")
+    for prev, cur in zip(segs, segs[1:]):
+        if overlaps(prev, cur):
+            raise CompactError("占位存在重叠，无法紧凑")
+    placed: list[Placement] = []
+    cursor = 0.0
+    for s in segs:
+        end = cursor + s.length
+        if end > rail_length + 1e-9:
+            raise CompactError("紧凑后超出杆长")
+        placed.append(Placement(cursor, end))
+        cursor = end
+    return placed
