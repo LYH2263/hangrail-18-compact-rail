@@ -278,3 +278,17 @@ button {
   display: flex; align-items: center; justify-content: center;
   padding: 0 4px; overflow: hidden; white-space: nowrap;
 }
+
+.ruler-actions { display: inline-flex; align-items: center; gap: .6rem; }
+.compact-btn {
+  font-size: .75rem;
+  padding: .2rem .55rem;
+  border-radius: 4px;
+  background: #3a2a1e;
+  color: var(--hang-copper);
+  border: 1px solid var(--hang-copper);
+  font-weight: 700;
+}
+.compact-btn:hover:not(:disabled) { background: var(--hang-copper); color: #2a1608; }
+.compact-btn:disabled { opacity: .45; cursor: not-allowed; }
+.compact-note { font-size: .78rem; margin-top: .35rem; }

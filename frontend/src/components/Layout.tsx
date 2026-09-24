@@ -26,13 +26,20 @@ export default function Layout() {
   const [overdue, setOverdue] = useState<Order[]>([]);
 
   useEffect(() => {
-    api<{ id: number; label: string; length_cm: number }[]>("/rails")
-      .then(async (rs) => {
-        const all = await Promise.all(rs.map((r) => api<Occ>(`/occupancy/${r.id}`)));
-        setMaps(all);
-      })
-      .catch(() => setMaps([]));
+    function loadOccupancy() {
+      api<{ id: number; label: string; length_cm: number }[]>("/rails")
+        .then(async (rs) => {
+          const all = await Promise.all(rs.map((r) => api<Occ>(`/occupancy/${r.id}`)));
+          setMaps(all);
+        })
+        .catch(() => setMaps([]));
+    }
+    loadOccupancy();
+    window.addEventListener("hangrail:occupancy-changed", loadOccupancy);
+    return () => window.removeEventListener("hangrail:occupancy-changed", loadOccupancy);
+  }, [loc.pathname]);
 
+  useEffect(() => {
     api<Order[]>("/orders")
       .then((rows) => {
         const ready = rows

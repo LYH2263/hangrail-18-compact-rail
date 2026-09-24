@@ -15,7 +15,7 @@ from app.schemas.schemas import (
     RailOut,
     StoreOut,
 )
-from app.services.rail_engine import Segment, first_fit
+from app.services.rail_engine import CompactError, Segment, compact, first_fit
 
 api_router = APIRouter()
 
@@ -50,6 +50,48 @@ def occupancy(rail_id: int, db: Session = Depends(get_db)):
     ).all()
     segs = []
     for p in placements:
+        order = db.get(WorkOrder, p.order_id)
+        if not order:
+            continue
+        segs.append(
+            OccupancySeg(
+                order_id=order.id,
+                ticket_code=order.ticket_code,
+                garment_name=order.garment_name,
+                start_cm=p.start_cm,
+                end_cm=p.end_cm,
+            )
+        )
+    segs.sort(key=lambda s: s.start_cm)
+    return OccupancyOut(rail_id=rail.id, label=rail.label, length_cm=rail.length_cm, segments=segs)
+
+
+@api_router.post("/rails/{rail_id}/compact", response_model=OccupancyOut)
+def compact_rail(rail_id: int, db: Session = Depends(get_db)):
+    # 行锁串行化同杆紧凑；仅锁定/读取目标杆，其它杆与门店不受影响
+    rail = db.scalar(select(HangRail).where(HangRail.id == rail_id).with_for_update())
+    if not rail:
+        raise HTTPException(404, "挂杆不存在")
+    placements = db.scalars(
+        select(RailPlacement).where(RailPlacement.rail_id == rail_id, RailPlacement.active == 1)
+    ).all()
+    # 与 compact 相同的排序：按原 start，保证新旧位置一一对应
+    placements.sort(key=lambda p: (p.start_cm, p.end_cm))
+    # 重排前快照：起止（衣长与票号由占位行自身保持）
+    snapshot = [(p, p.start_cm, p.end_cm) for p in placements]
+    occupied = [Segment(p.start_cm, p.end_cm) for p in placements]
+    try:
+        new_positions = compact(rail.length_cm, occupied)
+    except CompactError as exc:
+        # 整杆回滚到重排前起止
+        db.rollback()
+        raise HTTPException(409, f"紧凑失败，已回滚：{exc}")
+    for p, pos in zip(placements, new_positions, strict=True):
+        p.start_cm = pos.start_cm
+        p.end_cm = pos.end_cm
+    db.commit()
+    segs = []
+    for p, _, _ in snapshot:
         order = db.get(WorkOrder, p.order_id)
         if not order:
             continue

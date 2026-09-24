@@ -21,6 +21,36 @@ class Placement:
     end_cm: float
 
 
+class CompactError(ValueError):
+    """紧凑重排校验失败：非法衣长、重叠或越出杆长。"""
+
+
+def compact(rail_length: float, occupied: list[Segment]) -> list[Placement]:
+    """将全部占位按原 start 排序后无间隙左移贴齐。
+
+    保持相对次序、衣长（end-start）与票号集合不变；不产生重叠、
+    不越出杆长。任一占位非法（衣长 <= 0、相互重叠、总长超杆长）则抛
+    CompactError，由调用方整杆回滚到重排前起止。
+    """
+    ordered = sorted(occupied, key=lambda s: (s.start_cm, s.end_cm))
+    result: list[Placement] = []
+    cursor = 0.0
+    prev: Segment | None = None
+    for seg in ordered:
+        length = seg.end_cm - seg.start_cm
+        if length <= 0:
+            raise CompactError(f"占位衣长非法: {seg.start_cm}-{seg.end_cm}")
+        if prev is not None and seg.start_cm + 1e-9 < prev.end_cm:
+            raise CompactError("重排前占位相互重叠，无法紧凑")
+        end = cursor + length
+        if end > rail_length + 1e-9:
+            raise CompactError("占位总衣长超出杆长，无法紧凑")
+        result.append(Placement(cursor, end))
+        cursor = end
+        prev = seg
+    return result
+
+
 def free_gaps(rail_length: float, occupied: list[Segment]) -> list[Segment]:
     occ = sorted(occupied, key=lambda s: s.start_cm)
     gaps: list[Segment] = []
